@@ -1,0 +1,6 @@
+.DS_Store
+nesoc.cache/
+nesoc.hw/
+nesoc.runs/
+nesoc.sim/
+synth/

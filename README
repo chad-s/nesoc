@@ -1,0 +1,6 @@
+Final Project.
+
+Note contents of .gitignore. This repo excludes all Vivado outputs, and the
+constraints file. Put your constraints file in
+nesoc/synth/n4DDRfpga_withvideo.xdc and Vivado should find it.
+

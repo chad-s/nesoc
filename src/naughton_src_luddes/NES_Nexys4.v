@@ -97,8 +97,6 @@ module coe_to_loader(
     assign coe_data_out = ROM_data_out; 
     reg [15:0] rom_addr; 
 
-    assign coe_to_loader_clk_out = coe_to_loader_clk_out_ps;
-    reg coe_to_loader_clk_out_ps;
     reg coe_to_loader_clk_out_ns;
 
     always @(posedge clk) begin
@@ -112,12 +110,12 @@ module coe_to_loader(
 
         end //reset
         else begin
-            coe_to_loader_clk_out_ps <= coe_to_loader_clk_out_ns;
+            coe_to_loader_clk_out <= coe_to_loader_clk_out_ns;
 
             if(~GameLoader_done_in) begin
-                coe_to_loader_clk_out_ns <= ~coe_to_loader_clk_out_ps;
+                coe_to_loader_clk_out_ns <= ~coe_to_loader_clk_out;
 
-                if(coe_to_loader_clk_out_ps) begin
+                if(coe_to_loader_clk_out) begin
                     rom_addr <= rom_addr + 1; 
                     //debug
                     coe_to_loader_state_out <= 4'h4;
@@ -158,6 +156,7 @@ module GameLoader(input clk, input reset,
                   //JN - Debug 
                   output [2:0] gameLoader_led_out,
                   output [7:0] gameLoader_ines_0_out,
+                  output [3:0] gameLoader_ctr_out,
                   output error);
   reg [1:0] state = 0;
   reg [7:0] prgsize;
@@ -169,6 +168,7 @@ module GameLoader(input clk, input reset,
   assign gameLoader_led_out[1:0] = state;
   assign gameLoader_led_out[2] = reset;
   assign gameLoader_ines_0_out = ines[0];
+  assign gameLoader_ctr_out = ctr;
 
   assign error = (state == 3);
   wire [7:0] prgrom = ines[4];
@@ -208,9 +208,11 @@ module GameLoader(input clk, input reset,
            ctr <= ctr + 1;
            ines[ctr] <= indata;
            bytes_left <= {prgrom, 14'b0};
-           if (ctr == 4'b1111)
-             state <= (ines[0] == 8'h4E) && (ines[1] == 8'h45) && (ines[2] == 8'h53) && (ines[3] == 8'h1A) && !ines[6][2] && !ines[6][3] ? 1 : 3;
-         end
+           if (ctr == 4'b1111) begin
+             //JN - state <= (ines[0] == 8'h4E) && (ines[1] == 8'h45) && (ines[2] == 8'h53) && (ines[3] == 8'h1A) && !ines[6][2] && !ines[6][3] ? 1 : 3;
+             state <= (ines[0] == 8'h4E) && (ines[1] == 8'h45) && (ines[2] == 8'h53) && (ines[3] == 8'h1A) && !ines[6][2] && !ines[6][3] ? 1 : 0;
+           end//ctr==4'b1111
+         end//indata_clk
       1, 2: begin // Read the next |bytes_left| bytes into |mem_addr|
           if (bytes_left != 0) begin
             if (indata_clk) begin
@@ -365,19 +367,20 @@ module NES_Nexys4(input CLK100MHZ,
   //JN - Debug
   wire [2:0] gameLoader_led_out;
   wire [7:0] gameLoader_ines_0_out;
+  wire [3:0] gameLoader_ctr_out;
 
   wire my_sw_14;
   assign my_sw_14 = SW[14];
 
   GameLoader loader(clk, loader_reset, loader_input, loader_clk,
                     loader_addr, loader_write_data, loader_write,
-                    mapper_flags, loader_done, gameLoader_led_out, gameLoader_ines_0_out, loader_fail);
+                    mapper_flags, loader_done, gameLoader_led_out, gameLoader_ines_0_out, gameLoader_ctr_out, loader_fail);
 
   //JN - coe_to_loader
   coe_to_loader coe2loader(
-        //TODO *** RE-enable Clk ***
-        //.clk(clk),
-        .clk(my_sw_14),
+        .clk(clk),
+        //JN - IF YOU WANT TO USE THIS UNCOMMENT LINE 59 IN NEXYS4_MANUAL_CONVERT.XDC 
+        //          .clk(my_sw_14),
         .reset(loader_reset),
         .GameLoader_done_in(loader_done),
         .coe_to_loader_state_out(coe_to_loader_state_out),
@@ -464,9 +467,10 @@ module NES_Nexys4(input CLK100MHZ,
       AUD_MCLK, AUD_LRCK, AUD_SCK, AUD_SDIN);
  
   assign LED = {
-                coe_data_out,      //LED[15:8]
+                gameLoader_ctr_out,  //LED[15:12]
+                4'd0,                
+                //coe_data_out,      //LED[15:8]
                 //gameLoader_ines_0_out,      //LED[15:8]
-
                 //coe_to_loader_state_out,//LED[15:12]
                 //2'd0,                   //LED[11:10]
                 //clk,                    //LED[9]

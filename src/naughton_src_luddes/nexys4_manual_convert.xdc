@@ -49,9 +49,16 @@ set_property -dict { PACKAGE_PIN T1    IOSTANDARD LVCMOS33 } [get_ports { SW[12]
 #NET "SW<13>"			LOC = "R3"	| IOSTANDARD = "LVCMOS33";		#Bank = 34, Pin name = IO_L11P_T1_SRCC_34,					Sch name = SW13
 set_property -dict { PACKAGE_PIN R3    IOSTANDARD LVCMOS33 } [get_ports { SW[13] }];		#Bank = 34, Pin name = IO_L11P_T1_SRCC_34,					Sch name = SW13
 #NET "SW<14>"			LOC = "P3"	| IOSTANDARD = "LVCMOS33";		#Bank = 34, Pin name = IO_L14N_T2_SRCC_34,					Sch name = SW14
+
+
+
 set_property -dict { PACKAGE_PIN P3    IOSTANDARD LVCMOS33 } [get_ports { SW[14] }];		#Bank = 34, Pin name = IO_L14N_T2_SRCC_34,					Sch name = SW14
+
+
 #15nov29 - JN - Adding to allow SW[14] to control the clk for the GameLoader
-set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets SW_IBUF[14]]
+####set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets SW_IBUF[14]]
+
+
 
 
 #NET "SW<15>"			LOC = "P4"	| IOSTANDARD = "LVCMOS33";		#Bank = 34, Pin name = IO_L14P_T2_SRCC_34,					Sch name = SW15

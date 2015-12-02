@@ -56,7 +56,9 @@ set_property -dict { PACKAGE_PIN P3    IOSTANDARD LVCMOS33 } [get_ports { SW[14]
 
 
 #15nov29 - JN - Adding to allow SW[14] to control the clk for the GameLoader
+set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets SW_IBUF[15]]
 set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets SW_IBUF[14]]
+set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets SW_IBUF[12]]
 
 
 

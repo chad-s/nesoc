@@ -155,7 +155,7 @@ module coe_to_loader(
     end //always @(posedge clk)
 
 
-    smb_ROM smb_rom (
+    smb_ROM_take2 smb_rom (
         .clka(clk),            //input wire clka
         .addra(rom_addr),           //input wire addra
         .douta(ROM_data_out)            //output wire [7:0] doutb
@@ -171,6 +171,7 @@ module GameLoader(input clk, input reset,
                   output reg [21:0] mem_addr, output [7:0] mem_data, output mem_write,
                   output [31:0] mapper_flags,
                   output reg done,
+
                   //JN - Debug 
                   output [2:0] gameLoader_led_out,
                   output [7:0] gameLoader_ines_0_out,
@@ -180,15 +181,26 @@ module GameLoader(input clk, input reset,
                   output       gameLoader_ines_6_2_out,
                   output       gameLoader_ines_6_3_out,
                   output [3:0] gameLoader_ctr_out,
+                  output [3:0] gameLoader_ctr_flop1_out,
                   output [2:0] gameLoader_prg_size_out,
                   output [7:0] gameLoader_mem_data_out,
                   output [1:0] gameLoader_state_out,
+                  output reg [1:0] gameLoader_ctr_state_out,
+                  output [7:0] gameLoader_rom_data_out_flop1_out,
+
                   output error);
   reg [1:0] state = 0;
   reg [7:0] prgsize;
   reg [3:0] ctr;
   reg [7:0] ines[0:15]; // 16 bytes of iNES header
   reg [21:0] bytes_left;
+
+  wire [7:0] GL_ROM_data_out;
+  reg  [7:0] rom_data_out_flop1;
+  reg  [3:0] ctr_flop1;
+  reg  [3:0] ctr_flop2;
+  reg  [3:0] ctr_flop3;
+  reg  [15:0] rom_ctr;
 
   //JN - DEBUG   
   assign gameLoader_led_out[1:0] = state;
@@ -201,14 +213,21 @@ module GameLoader(input clk, input reset,
   assign gameLoader_ines_6_2_out = ines[6][2];
   assign gameLoader_ines_6_3_out = ines[6][3];
   assign gameLoader_ctr_out = ctr;
+  assign gameLoader_ctr_flop1_out = ctr_flop1;
   assign gameLoader_prg_size_out = prg_size;
   assign gameLoader_mem_data_out = mem_data;
+  assign gameLoader_rom_data_out_flop1_out = rom_data_out_flop1;
+  assign gameLoader_rom_ctr_out = rom_ctr;
 
   assign error = (state == 3);
   wire [7:0] prgrom = ines[4];
   wire [7:0] chrrom = ines[5];
-  assign mem_data = indata;
-  assign mem_write = (bytes_left != 0) && (state == 1 || state == 2) && indata_clk;
+  //assign mem_data = indata;
+  //JN - 15dec01 - assign mem_data = GL_ROM_data_out;
+  assign mem_data = rom_data_out_flop1;
+  //15dec01 - JN - because i'm holding indata_clk to 1'd1 we need to qualify with a mem write enable of clk
+  //assign mem_write = (bytes_left != 0) && (state == 1 || state == 2) && indata_clk;
+  assign mem_write = (bytes_left != 0) && (state == 1 || state == 2) && indata_clk && clk;
   
   wire [2:0] prg_size = prgrom <= 1  ? 0 :
                         prgrom <= 2  ? 1 : 
@@ -234,36 +253,94 @@ module GameLoader(input clk, input reset,
       state <= 0;
       done <= 0;
       ctr <= 0;
+      //JN
+      rom_ctr <= 0;
       mem_addr <= 0;  // Address for PRG
+      gameLoader_ctr_state_out <= 2'd0;
+      //clearing header
+      ines[0] <= 8'd0;
+      ines[1] <= 8'd0;
+      ines[2] <= 8'd0;
+      ines[3] <= 8'd0;
+      ines[4] <= 8'd0;
+      ines[5] <= 8'd0;
+      ines[6] <= 8'd0;
+      ines[7] <= 8'd0;
+      ines[8] <= 8'd0;
+      ines[9] <= 8'd0;
+      ines[10] <= 8'd0;
+      ines[11] <= 8'd0;
+      ines[12] <= 8'd0;
+      ines[13] <= 8'd0;
+      ines[14] <= 8'd0;
+      ines[15] <= 8'd0;
     end else begin
+    
+      rom_data_out_flop1 <= GL_ROM_data_out;
+      ctr_flop1 <= ctr;
+      ctr_flop2 <= ctr_flop1;
+      ctr_flop3 <= ctr_flop2;
+
       case(state)
       // Read 16 bytes of ines header
       0: if (indata_clk) begin
-           ctr <= ctr + 1;
-           ines[ctr] <= indata;
+           gameLoader_ctr_state_out <= 2'd1;
+           //ines[ctr] <= indata;
+           //JN - 15dec01 - ines[ctr] <= GL_ROM_data_out;
+           //15dec01 - JN - ***CLOSE*** - ines[ctr_flop1] <= rom_data_out_flop1;
+           //15dec01 - JN - 352p - **$$$ WORKS $$$** - ines[(ctr_flop1-2)] <= rom_data_out_flop1;
+           //JN - Need to delay writing to get around 2 cycle latency from smb_ROM
+           ines[ctr_flop3] <= rom_data_out_flop1;
            bytes_left <= {prgrom, 14'b0};
+
+           rom_ctr <= rom_ctr + 1;
+           ctr <= ctr + 1;
+
            if (ctr == 4'b1111) begin
+              gameLoader_ctr_state_out <= 2'd2;
              //JN - state <= (ines[0] == 8'h4E) && (ines[1] == 8'h45) && (ines[2] == 8'h53) && (ines[3] == 8'h1A) && !ines[6][2] && !ines[6][3] ? 1 : 3;
              state <= (ines[0] == 8'h4E) && (ines[1] == 8'h45) && (ines[2] == 8'h53) && (ines[3] == 8'h1A) && !ines[6][2] && !ines[6][3] ? 1 : 0;
            end//ctr==4'b1111
          end//indata_clk
+         else begin
+            gameLoader_ctr_state_out <=2'd3;
+         end //~indata_clk
       1, 2: begin // Read the next |bytes_left| bytes into |mem_addr|
           if (bytes_left != 0) begin
             if (indata_clk) begin
+              //JN
+              rom_ctr <= rom_ctr + 1;
+
               bytes_left <= bytes_left - 1;
               mem_addr <= mem_addr + 1;
             end
           end else if (state == 1) begin
             state <= 2;
             mem_addr <= 22'b10_0000_0000_0000_0000_0000; // Address for CHR
+            //JN - Adding one more Byte to account for the initial flopped read.  Need to let the
+            //bytes_left <= {1'b0, chrrom, 13'b0};
             bytes_left <= {1'b0, chrrom, 13'b0};
           end else if (state == 2) begin
             done <= 1;
           end
-        end
+        end //state 1 or 2
+     3: begin //JN - ERROR STATE
+            ines[0] = 8'hDE;    //FOR Display of ERROR State 
+            ines[1] = 8'hAD;    //FOR Display of ERROR State
+        end //state 3
       endcase
     end
   end
+
+    smb_ROM_take2 smb_rom (
+        .clka(clk),            //input wire clka
+        //JN - WORKS - .addra(ctr),           //input wire addra
+        .addra(rom_ctr),           //input wire addra
+        .douta(GL_ROM_data_out)            //output wire [7:0] doutb
+    );
+
+
+
 endmodule
 
 
@@ -301,18 +378,17 @@ module NES_Nexys4(input CLK100MHZ,
   wire clock_locked;
   wire clk;
 //  clk_wiz_v3_6 clock_21mhz(.CLK_IN1(CLK100MHZ), .CLK_OUT1(clk),  .RESET(1'b0), .LOCKED(clock_locked));
-  clk_wiz_nesoc instance_name
-  (
-    // Clock in ports
-    .clk_in1(CLK100MHZ),                    // input clk_in1
+  clk_wiz_out_mhz instance_name
+   (
+   // Clock in ports
+    .clk_in1(CLK100MHZ),      // input clk_in1
     // Clock out ports
-    //.clk_21_478_mhz(clk_21_478_mhz),      // output clk_21_478_mhz
-    .clk_21_478_mhz(clk),                   // output clk_21_478_mhz
-    .clk_4_370_mhz(clk_4_370_mhz),          // output clk_4_370_mhz
+    .clk_21_478_mhz(clk),     // output clk_21_478_mhz
+    .clk_4_698_mhz(clk_4_698_mhz),     // output clk_4_698_mhz
     // Status and control signals
-    .reset(1'b0),                           // input reset
-    .locked(locked)                         // output locked
-  );
+    .reset(1'd0), // input reset
+    .locked(locked)      // output locked
+   );
 
   // UART
   wire [7:0] uart_data;
@@ -412,13 +488,19 @@ module NES_Nexys4(input CLK100MHZ,
   wire       gameLoader_ines_6_2_out;
   wire       gameLoader_ines_6_3_out;
   wire [3:0] gameLoader_ctr_out;
+  wire [3:0] gameLoader_ctr_flop1_out;
   wire [2:0] gameLoader_prg_size_out;
   wire [7:0] gameLoader_mem_data_out;
   wire [1:0] gameLoader_state_out;
+  wire [1:0] gameLoader_ctr_state_out;
+  wire [7:0] gameLoader_rom_data_out_flop1_out;
 
 
   wire my_sw_14;
   assign my_sw_14 = SW[14];
+  wire my_sw_15;
+  assign my_sw_15 = SW[15];
+
 
   //JN - 11/30 - GameLoader loader(clk, loader_reset, loader_input, loader_clk,
   GameLoader loader(
@@ -427,7 +509,9 @@ module NES_Nexys4(input CLK100MHZ,
                     .clk(SW[13] ? clk : my_sw_14),
                     .reset(loader_reset),
                     .indata(coe_data_out),
-                    .indata_clk(clk),
+                    //.indata_clk(clk),
+                    .indata_clk(1'd1),
+                    //.indata_clk(SW[13] ? clk : SW[12]),
                     .mem_addr(loader_addr),
                     .mem_data(loader_write_data),
                     .mem_write(loader_write),
@@ -442,9 +526,12 @@ module NES_Nexys4(input CLK100MHZ,
                     .gameLoader_ines_6_2_out(gameLoader_ines_6_2_out),
                     .gameLoader_ines_6_3_out(gameLoader_ines_6_3_out),
                     .gameLoader_ctr_out(gameLoader_ctr_out),
+                    .gameLoader_ctr_flop1_out(gameLoader_ctr_flop1_out),
                     .gameLoader_prg_size_out(gameLoader_prg_size_out),
                     .gameLoader_mem_data_out(gameLoader_mem_data_out),
                     .gameLoader_state_out(gameLoader_state_out),
+                    .gameLoader_ctr_state_out(gameLoader_ctr_state_out),
+                    .gameLoader_rom_data_out_flop1_out(gameLoader_rom_data_out_flop1_out),
                     .error(loader_fail)
                 );
 
@@ -532,12 +619,17 @@ module NES_Nexys4(input CLK100MHZ,
     end else begin
         led_enable <= 255;
         //JN - led_value <= sound_signal;
-        led_value <= {  gameLoader_ines_2_out,        //[31:24]
-                        gameLoader_ines_3_out,        //[23:16]
-                        gameLoader_mem_data_out,      //[15:8]
+        led_value <= {  //gameLoader_ines_0_out,        //[31:24]
+                        loader_write_data,        //[31:24]
+                        gameLoader_ines_1_out,        //[23:16]
+                        //gameLoader_ines_2_out,        //[23:16]
+                        //gameLoader_ines_3_out,        //[23:16]
+                        gameLoader_rom_data_out_flop1_out, //[15:8]
+                        //gameLoader_mem_data_out,      //[15:8]
                         2'd0,                         //[7:6]
                         gameLoader_state_out,         //[5:4]
-                        gameLoader_ctr_out            //[3:0]
+                        //gameLoader_ctr_out            //[3:0]
+                        gameLoader_ctr_flop1_out        //[3;0]
                         //coe_to_loader_rom_addr_out[3:0]    //[3:0]
                      };
     end//~cpu_reset
@@ -563,11 +655,15 @@ module NES_Nexys4(input CLK100MHZ,
                 //clk,                    //LED[9]
                 //coe_to_loader_clk_out,  //LED[8]
                 //loader_clk,             //LED[7]
-                2'd0,                   //LED[11:10]
+                
+                gameLoader_ctr_state_out,   //LED[11:10]
                 gameLoader_ines_6_3_out,    //LED[9]
                 gameLoader_ines_6_2_out,    //LED[8]
-                clk,                    //LED[7]
-                gameLoader_led_out,     //LED[6]=reset LED[5:4] = GameLoader.state
+                //clk,                    //LED[7]
+                reset_nes,                    //LED[7]
+                run_mem,                    //LED[6]
+                2'b0,                       //LED[5:4]
+                //gameLoader_led_out,     //LED[6]=reset LED[5:4] = GameLoader.state
                 loader_write,           //LED[3]
                 ramfail,                //LED[2]
                 loader_fail,            //LED[1]

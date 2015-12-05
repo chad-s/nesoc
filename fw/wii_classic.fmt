@@ -1,0 +1,226 @@
+                  ;------------------------------------------------------------------------------------------
+                  ;
+                  ; INTRODUCTION
+                  ; ------------
+                  ;
+                  ; .....
+                  ;
+                  ;------------------------------------------------------------------------------------------
+                  ; Hardware Constants
+                  ;------------------------------------------------------------------------------------------
+                  ;
+                  ; The CONSTANT directive below define the 7-Bit I2C addresses of the Wii Classic Controller
+                  ;
+                  CONSTANT wii_classic_address, 52 ; NINTENDO WII Classic Controller
+                  ;
+                  ;
+                  ;------------------------------------------------------------------------------------------
+                  ; Port Addresses
+                  ;------------------------------------------------------------------------------------------
+                  ;
+                  CONSTANT PA_BYTE_0, 00           ; Data read from controller
+                  CONSTANT PA_BYTE_1, 01
+                  CONSTANT PA_BYTE_2, 02
+                  CONSTANT PA_BYTE_3, 03
+                  CONSTANT PA_BYTE_4, 04
+                  CONSTANT PA_BYTE_5, 05
+                  ;
+                  ;
+                  ;------------------------------------------------------------------------------------------
+                  ; Registers
+                  ;------------------------------------------------------------------------------------------
+                  ;
+                  ; The following registers within the currently active bank are used by these routines....
+                  ;
+                  ;    s0, s1, s5, sD and sF
+                  ;
+                  NAMEREG s7, Byte0                ;Bytes read from the controller
+                  NAMEREG s8, Byte1
+                  NAMEREG s9, Byte2
+                  NAMEREG sA, Byte3
+                  NAMEREG sB, Byte4
+                  NAMEREG sC, Byte5
+                  ;
+                  ;
+                  ;------------------------------------------------------------------------------------------
+                  ; Routine to initialize the ouput ports and the controller
+                  ;------------------------------------------------------------------------------------------
+                  ;
+                  ADDRESS 000
+                  JUMP init                        ; workaround to avoid location 3 corruption
+                  JUMP init                        ; by Vivado Hardware Manager.  Bug was flagged by
+                  JUMP init                        ; Ken Chapman and is known to be in 2014.2
+                  JUMP init                        ; Address 003 can be corrupted by Vivado HW manager
+                  ;
+            init: CALL delay_1ms                   ; Give controller some time to get going
+                  ;
+                  CALL wii_classic_init            ; Initialize the controller
+                  JUMP C, error_handler2
+                  ;
+                  LOAD s6, 00                      ; Initialize (clear) out ports
+                  OUTPUT s6, PA_BYTE_5
+                  OUTPUT s6, PA_BYTE_4
+                  OUTPUT s6, PA_BYTE_3
+                  OUTPUT s6, PA_BYTE_2
+                  OUTPUT s6, PA_BYTE_1
+                  OUTPUT s6, PA_BYTE_0
+                  ;
+                  ;------------------------------------------------------------------------------------------
+                  ; MAIN: Read controller inputs, convert to output format,
+                  ; and send the data out.
+                  ;------------------------------------------------------------------------------------------
+                  ;
+            main: CALL wii_classic_read
+                  JUMP C, error_handler
+                  OUTPUT Byte5, PA_BYTE_5
+                  OUTPUT Byte4, PA_BYTE_4
+                  OUTPUT Byte3, PA_BYTE_3
+                  OUTPUT Byte2, PA_BYTE_2
+                  OUTPUT Byte1, PA_BYTE_1
+                  OUTPUT Byte0, PA_BYTE_0
+                  CALL delay_1ms
+                  JUMP main
+                  ;
+                  ;
+                  ;------------------------------------------------------------------------------------------
+                  ; Handle errors quasi-eligantly. This will toggle the DPad output every second. Possible
+                  ; enhancement would be to designate an error-code output port.
+                  ;------------------------------------------------------------------------------------------
+                  ;
+   error_handler: CALL delay_1s
+                  LOAD s6, 00
+                  OUTPUT s6, PA_BYTE_4
+                  LOAD s6, FF
+                  OUTPUT s6, PA_BYTE_5
+                  ;
+                  CALL delay_1s
+                  LOAD s6, FF
+                  OUTPUT s6, PA_BYTE_4
+                  LOAD s6, 00
+                  OUTPUT s6, PA_BYTE_5
+                  ;
+                  JUMP error_handler
+                  ;
+  error_handler2: CALL delay_1s
+                  OUTPUT s6, PA_BYTE_5
+                  OUTPUT s6, PA_BYTE_4
+                  ;
+                  CALL delay_1s
+                  LOAD s5, FF
+                  OUTPUT s5, PA_BYTE_5
+                  OUTPUT s5, PA_BYTE_4
+                  ;
+                  JUMP error_handler2
+                  ;
+                  ;------------------------------------------------------------------------------------------
+                  ; Routine to read from the Wii Classic Controller
+                  ;------------------------------------------------------------------------------------------
+                  ; This routine will read the 6-byte status from the Wii Classic Controller
+                  ; registers and return it in registers 's8' through 'sD'.
+                  ;
+                  ; If for some reason communication is unsuccessful then the CARRY flag will
+                  ; be set and this could be tested by your code and used to take appropriate actions.
+                  ;
+wii_classic_read: CALL I2C_initialise              ;ensure bus state and initialise 'sF'
+                  CALL I2C_start                   ;bus start (S)
+                  ;
+                  LOAD s5, wii_classic_address     ;device base address (7-bits)
+                  SL0 s5                           ;Write operation (LSB = 0)
+                  CALL I2C_Tx_byte                 ;Transmit address with write
+                  CALL I2C_Rx_ACK                  ;Receive ACK
+                  RETURN C                         ;Return on failure (Carry flag set)
+                  ;
+                  LOAD s5, 00                      ;Resetting the controller data pointer
+                  CALL I2C_Tx_byte
+                  CALL I2C_Rx_ACK                  ;Receive ACK
+                  RETURN C                         ;Return on failure (Carry flag set)
+                  ;
+                  CALL I2C_stop
+                  CALL delay_1ms
+                  ;
+                  CALL I2C_initialise
+                  CALL I2C_start                   ;bus restart (Sr)
+                  ;
+                  LOAD s5, wii_classic_address     ;device base address (7-bits)
+                  SL1 s5                           ;Read operation (LSB = 1)
+                  CALL I2C_Tx_byte                 ;Transmit address with write
+                  CALL I2C_Rx_ACK                  ;Receive ACK
+                  RETURN C                         ;Return on failure (Carry flag set)
+                  ;
+                  CALL I2C_Rx_byte                 ;Read data from controller
+                  LOAD Byte0, s5
+                  CALL I2C_Tx_ACK
+                  CALL I2C_Rx_byte                 ;Read data from controller
+                  LOAD Byte1, s5
+                  CALL I2C_Tx_ACK
+                  CALL I2C_Rx_byte                 ;Read data from controller
+                  LOAD Byte2, s5
+                  CALL I2C_Tx_ACK
+                  CALL I2C_Rx_byte                 ;Read data from controller
+                  LOAD Byte3, s5
+                  CALL I2C_Tx_ACK
+                  CALL I2C_Rx_byte                 ;Read data from controller
+                  LOAD Byte4, s5
+                  CALL I2C_Tx_ACK
+                  CALL I2C_Rx_byte                 ;Read data from controller
+                  LOAD Byte5, s5
+                  ;
+                  CALL I2C_Tx_NACK                 ;Transmit NACK to end read operation
+                  CALL I2C_stop                    ;transmit stop (P)
+                  RETURN                           ;with Carry flag reset
+                  ;------------------------------------------------------------------------------------------
+                  ; Routine to initialize the wii classic controller
+                  ;------------------------------------------------------------------------------------------
+                  ;
+                  ;
+wii_classic_init: CALL I2C_initialise              ;ensure bus state and initialise 'sF'
+                  CALL I2C_start                   ;bus start (S)
+                  ;
+                  LOAD s5, wii_classic_address     ;device base address (7-bits)
+                  SL0 s5                           ;Write operation (LSB = 0)
+                  CALL I2C_Tx_byte                 ;Transmit address with write
+                  CALL I2C_Rx_ACK                  ;Receive ACK
+                  RETURN C                         ;Return on failure (Carry flag set)
+                  ;
+                  LOAD s5, F0                      ;Data to be written to controller
+                  CALL I2C_Tx_byte
+                  CALL I2C_Rx_ACK                  ;Receive ACK
+                  RETURN C                         ;Return on failure (Carry flag set)
+                  ;
+                  LOAD s5, 55                      ;Data to be written to controller
+                  CALL I2C_Tx_byte
+                  CALL I2C_Rx_ACK                  ;Receive ACK
+                  RETURN C                         ;Return on failure (Carry flag set)
+                  ;
+                  CALL I2C_stop                    ;transmit stop (P)
+                  CALL delay_1ms                   ;time for write to complete
+                  ;
+                  ;
+                  CALL I2C_initialise              ;ensure bus state and initialise 'sF'
+                  CALL I2C_start                   ;bus start (S)
+                  ;
+                  LOAD s5, wii_classic_address     ;device base address (7-bits)
+                  SL0 s5                           ;Write operation (LSB = 0)
+                  CALL I2C_Tx_byte                 ;Transmit address with write
+                  CALL I2C_Rx_ACK                  ;Receive ACK
+                  RETURN C                         ;Return on failure (Carry flag set)
+                  ;
+                  LOAD s5, FB                      ;Data to be written to controller
+                  CALL I2C_Tx_byte
+                  CALL I2C_Rx_ACK                  ;Receive ACK
+                  RETURN C                         ;Return on failure (Carry flag set)
+                  ;
+                  LOAD s5, 00                      ;Data to be written to controller
+                  CALL I2C_Tx_byte
+                  CALL I2C_Rx_ACK                  ;Receive ACK
+                  RETURN C                         ;Return on failure (Carry flag set)
+                  ;
+                  CALL I2C_stop                    ;transmit stop (P)
+                  CALL delay_1ms                   ;time for write to complete
+                  ;
+                  AND s0, FF                       ;clear carry flag (write successful)
+                  RETURN                           ;with Carry flag reset
+                  ;
+                  ;
+                  INCLUDE "soft_delays_100mhz.psm"
+                  INCLUDE "i2c_routines.psm"

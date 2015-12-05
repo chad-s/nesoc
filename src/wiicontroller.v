@@ -15,55 +15,150 @@ module wiicontroller(
    inout    scl
 );
 
-   assign udlr_dpad        = 4'b0;
-   assign abxy_btns        = 4'b0;
-   assign lr_trig_btns     = 5'b0;
-   assign lr_z_btns        = 2'b0;
-   assign st_sel_hm_btns   = 3'b0;
-   assign l_stick_x        = 3'b0; 
-   assign l_stick_y        = 3'b0;
-   assign r_stick_x        = 3'b0;
-   assign r_stick_y        = 3'b0;
+   /////////////////////////////////////
+   // Port addresses for the PicoBlaze
+   /////////////////////////////////////
+	localparam	PA_BYTE_0         = 8'h00,
+               PA_BYTE_1         = 8'h01,
+               PA_BYTE_2         = 8'h02,
+               PA_BYTE_3         = 8'h03,
+               PA_BYTE_4         = 8'h04,
+               PA_BYTE_5         = 8'h05,
+					I2C_input_port 	= 8'h02,
+					I2C_output_port 	= 8'h20;
+
+   /////////////////////////////////////
+   // Regs to store Controller outputs
+   /////////////////////////////////////
+   reg  [7:0] Byte0;
+   reg  [7:0] Byte1;
+   reg  [7:0] Byte2;
+   reg  [7:0] Byte3;
+   reg  [7:0] Byte4;
+   reg  [7:0] Byte5;
+
+   
+   /////////////////////////////////////
+   // Nets for KCPSM6 things
+	/////////////////////////////////////
+   wire [11:0] address;
+   wire [17:0] instruction;
+   wire        bram_enable;
+   wire  [7:0] port_id;
+   wire        write_strobe;
+   wire        k_write_strobe;
+   wire  [7:0] out_port;
+   wire        read_strobe;
+   reg   [7:0] in_port;
+   wire        interrupt;
+   wire        interrupt_ack;
 
 
    /////////////////////////////////////
    // Nets for i2c interface
    /////////////////////////////////////
-   wire  scl_pad_i, scl_pad_o, scl_padoen_o;
-   wire  sda_pad_i, sda_pad_o, sda_padoen_o;
+   wire  scl_pad_i;
+   reg   scl_padoen_oe;
+   wire  sda_pad_i;
+   reg   sda_padoen_oe;
 
-   assign scl = scl_padoen_oe ? 1’bz : scl_pad_o;
-   assign sda = sda_padoen_oe ? 1’bz : sda_pad_o;
+   assign scl = scl_padoen_oe ? 1'bz : 1'b0;
+   assign sda = sda_padoen_oe ? 1'bz : 1'b0;
    assign scl_pad_i = scl;
    assign sda_pad_i = sda;
 
 
-   i2c_master_top i2c_master(
-      // wishbone signals
-      .wb_clk_i(clk),     // master clock input
-      .wb_rst_i(1'b0),     // synchronous active high reset
-      .arst_i(reset),       // asynchronous reset
-      .wb_adr_i,     // lower address bits 3'
-      .wb_dat_i,     // databus input 8'
-      .wb_dat_o,     // databus output 8'
-      .wb_we_i,      // write enable input
-      .wb_stb_i,     // stobe/core select signal
-      .wb_cyc_i,     // valid bus cycle input
-      .wb_ack_o,     // bus cycle acknowledge output
-      .wb_inta_o,    // interrupt request signal output
+   /////////////////////////////////////
+   // Mapping bytes to buttons
+   /////////////////////////////////////
+   assign udlr_dpad        = ~{Byte5[0], Byte4[6], Byte5[1], Byte4[7]};
+   assign abxy_btns        = ~{Byte5[4], Byte5[6], Byte5[3], Byte5[5]};
+   assign l_trig_btn       = {Byte2[6:5], Byte3[7:5]};
+   assign r_trig_btn       = Byte3[4:0];
+   assign lr_z_btns        = ~{Byte5[7], Byte5[2]};
+   assign st_sel_hm_btns   = ~{Byte4[2], Byte4[4], Byte4[3]};
+   assign l_stick_x        = Byte0[5:0];
+   assign l_stick_y        = Byte1[5:0];
+   assign r_stick_x        = {Byte0[7:6], Byte1[7:6], Byte2[7]};
+   assign r_stick_y        = Byte2[4:0];
 
-      // I2C signals
-      // i2c clock line
-      .scl_pad_i(scl_pad_i),       // SCL-line input
-      .scl_pad_o(scl_pad_o),       // SCL-line output (always 1'b0)
-      .scl_padoen_o(scl_padoen_o),    // SCL-line output enable (active low)
 
-      // i2c data line
-      .sda_pad_i(sda_pad_i)j,       // SDA-line input
-      .sda_pad_o(sda_pad_o),       // SDA-line output (always 1'b0)
-      .sda_padoen_o(sda_padoen_o)     // SDA-line output enable (active low)
+   /////////////////////////////////////
+   // kcpsm6 inputs (only the sda and scl lines)
+   /////////////////////////////////////
+   always @ (posedge clk) begin
+      // Since this is the only input, just registering it and driving to
+      // in_port every clk
+   	in_port <= {6'b0, sda_pad_i, scl_pad_i};
+   end
+
+
+   /////////////////////////////////////
+   // kcpsm6 outputs
+	/////////////////////////////////////
+   always @ (posedge clk) begin
+      // 'write_strobe' is used to qualify all writes to general output ports.
+      if (write_strobe == 1'b1) begin
+
+         if (port_id == PA_BYTE_0) begin
+            Byte0      <= out_port;
+         end
+         if (port_id == PA_BYTE_1) begin
+            Byte1      <= out_port;
+         end
+         if (port_id == PA_BYTE_2) begin
+            Byte2      <= out_port;
+         end
+         if (port_id == PA_BYTE_3) begin
+            Byte3      <= out_port;
+         end
+         if (port_id == PA_BYTE_4) begin
+            Byte4      <= out_port;
+         end
+         if (port_id == PA_BYTE_5) begin
+            Byte5      <= out_port;
+         end
+         // Drive the I2C pins at output
+         if (port_id == I2C_output_port) begin
+            sda_padoen_oe  <= out_port[1];
+            scl_padoen_oe  <= out_port[0];
+         end
+      end
+   end
+
+
+   /////////////////////////////////////
+   // Submodule Includes
+	/////////////////////////////////////
+
+   // PicoBlaze for I2C
+   kcpsm6
+   #(
+      .interrupt_vector (12'h3FF),
+      .scratch_pad_memory_size(64),
+      .hwbuild    (8'h00)
+   ) processor (
+      .address(address),
+      .instruction(instruction),
+      .bram_enable(bram_enable),
+      .port_id(port_id),
+      .write_strobe(write_strobe),
+      .k_write_strobe(k_write_strobe),
+      .out_port(out_port),
+      .read_strobe(read_strobe),
+      .in_port(in_port),
+      .interrupt(interrupt),
+      .interrupt_ack(interrupt_ack),
+      .reset(~reset),
+      .clk(clk)
    );
-
-
+   // Wii controller reading program
+   wii_classic program_rom
+   (
+      .enable(bram_enable),
+      .address(address),
+      .instruction(instruction),
+      .clk(clk)
+   );
 
 endmodule

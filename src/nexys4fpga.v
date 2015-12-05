@@ -4,76 +4,92 @@ module Nexys4fpga (
 	input				   btnu, btnd,		// pushbutton inputs - up (db_btns[3]) and down (db_btns[1])
 	input				   btnc,				// pushbutton inputs - center button -> db_btns[5]
 	input				   btncpureset,   // red pushbutton input -> db_btns[0]
+   input   [15:0]    sw,
 	
 	output 	[6:0]		seg,				// Seven segment display cathode pins
 	output            dp,
-	output	[7:0]		an//,				// Seven segment display anode pins	
+	output	[7:0]		an,				// Seven segment display anode pins	
+   output   [15:0]   led,
    
-   /////////////////////////////////////
-   // i2c wires for the the i2c controller
-   /////////////////////////////////////
-   inout    [1:0]    JD
+   inout    [3:2]    JD
 ); 
 
-	// parameter
-	parameter SIMULATE = 0;
+   /////////////////////////////////////
+   // System-level Nets
+   /////////////////////////////////////
+	wire	   sysclk;			// 100MHz clock from on-board oscillator	
+	wire     sysreset_n;		// system reset signal - asserted high to force reset
+	assign   sysclk      = clk;
+	assign 	sysreset_n  = db_btns[0]; // btnCpuReset is asserted low
 
-	// internal variables
+
+   /////////////////////////////////////
+   // User I/O Nets
+   /////////////////////////////////////
 	wire 	   [5:0]		db_btns;			// debounced buttons
 	
-	wire				   sysclk;			// 100MHz clock from on-board oscillator	
-	wire				   sysreset;		// system reset signal - asserted high to force reset
-	
-	wire 	   [4:0]		dig7, dig6,
-						   dig5, dig4,
-						   dig3, dig2, 
-						   dig1, dig0;		// display digits
+	wire 	   [4:0]		dig7, dig6, dig5, dig4, dig3, dig2, dig1, dig0;		// display digits
 	wire 	   [7:0]		decpts;			// decimal points
-	
 	wire     [7:0]    segs_int;      // sevensegment module the segments and the decimal point
 
-
-	// set up the display and LEDs
-	assign	dig7 = {5'd10};
-	assign	dig6 = {db_btns[5:1]};
-	assign	dig5 = {1'b0, abxy_btns};
+   // Seven seg
+	assign	dig7 = {5'b11111};
+	assign	dig6 = {5'b11111};
+	assign	dig5 = {5'b11111};
 	assign	dig4 = {5'b11111};
 	assign	dig3 = {5'b11111};
 	assign	dig2 = {5'b11111};
 	assign	dig1 = {5'b11111};
 	assign	dig0 = {5'b11111};
-	
 	assign	decpts = 8'b00000000;			// d2 is on
-
-	// global assigns
-	assign	sysclk   = clk;
-	assign 	sysreset = db_btns[0]; // btnCpuReset is asserted low
-	
 	assign   dp   = segs_int[7];
 	assign   seg  = segs_int[6:0];
 
 
    /////////////////////////////////////
-   // Nets for the controller
+   // LED Outputs for Debug
    /////////////////////////////////////
-   //wire   [3:0]	udlr_dpad;
+   // Currently: sends controller ouput to leds, selectable
+   // by switches (no debounce).
+   wire [7:0] show_byte;
+   assign show_byte =    sw[0] ? {4'b0, udlr_dpad} :
+                        (sw[1] ? {4'b0, abxy_btns} :
+                        (sw[2] ? {3'b0, l_trig_btn} :
+                        (sw[3] ? {3'b0, r_trig_btn} :
+                        (sw[4] ? {6'b0, lr_z_btns} :
+                        (sw[5] ? {5'b0, st_sel_hm_btns} : 
+                        (sw[6] ? {2'b0, l_stick_x} :
+                        (sw[7] ? {2'b0, l_stick_y} :
+                        (sw[8] ? {3'b0, r_stick_x} :
+                        (sw[9] ? {3'b0, r_stick_y} :
+                        8'b0)))))))));
+
+   assign led = {sw[15:8], show_byte};
+
+
+   /////////////////////////////////////
+   // Nets for Wii Controller
+   /////////////////////////////////////
+   wire   [3:0]	udlr_dpad;
    wire   [3:0]	abxy_btns;
-   //wire   [4:0]	l_trig_btn;
-   //wire   [4:0]	r_trig_btn;
-   //wire   [1:0]	lr_z_btns;
-   //wire   [2:0]	st_sel_hm_btns;
-   //wire   [5:0]	l_stick_x, l_stick_y;
-   //wire   [4:0]	r_stick_x, r_stick_y;
-   wire           scl;
-   wire           sda;
+   wire   [4:0]	l_trig_btn;
+   wire   [4:0]	r_trig_btn;
+   wire   [1:0]	lr_z_btns;
+   wire   [2:0]	st_sel_hm_btns;
+   wire   [5:0]	l_stick_x, l_stick_y;
+   wire   [4:0]	r_stick_x, r_stick_y;
 
 
 
-	//instantiate the debounce module
+
+   /////////////////////////////////////
+   // Submodule includes
+   /////////////////////////////////////
+
+	//DEBOUNCE
 	debounce
 	#(
-		.RESET_POLARITY_LOW(1),
-		.SIMULATE(SIMULATE)
+		.RESET_POLARITY_LOW(1)
 	) DB
 	(
 		.clk(sysclk),	
@@ -81,11 +97,10 @@ module Nexys4fpga (
 		.pbtn_db(db_btns)//,
 	);	
 		
-	// instantiate the 7-segment, 8-digit display
+	//SEVEN SEGMENT
 	sevensegment
 	#(
-		.RESET_POLARITY_LOW(1),
-		.SIMULATE(SIMULATE)
+		.RESET_POLARITY_LOW(1)
 	) SSB
 	(
 		// inputs for control signals
@@ -105,24 +120,27 @@ module Nexys4fpga (
 		
 		// clock and reset signals (100 MHz clock, active high reset)
 		.clk(sysclk),
-		.reset(sysreset)//,
+		.reset(sysreset_n)//,
 	);
 
-   wiicontroller ctrl(
+   // WII CLASSIC CONTROLLER
+   wiicontroller controller(
       .clk(sysclk),
-      .reset(sysreset),
+      .reset(sysreset_n),
 
-      //.udlr_dpad,
+      .udlr_dpad(udlr_dpad),
       .abxy_btns(abxy_btns),
-      //.l_trig_btn,
-      //.r_trig_btn,
-      //.lr_z_btns,
-      //.st_sel_hm_btns,
-      //.l_stick_x, l_stick_y,
-      //.r_stick_x, r_stick_y,
+      .l_trig_btn(l_trig_btn),
+      .r_trig_btn(r_trig_btn),
+      .lr_z_btns(lr_z_btns),
+      .st_sel_hm_btns(st_sel_hm_btns),
+      .l_stick_x(l_stick_x),
+      .l_stick_y(l_stick_y),
+      .r_stick_x(r_stick_x),
+      .r_stick_y(r_stick_y),
 
-      sda(JD[0]),
-      scl(JD[1])
+      .sda(JD[3]),
+      .scl(JD[2])
    );
 			
 endmodule
